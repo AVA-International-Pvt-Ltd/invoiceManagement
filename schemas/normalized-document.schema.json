@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/normalized-document.schema.json",
+  "title": "NormalizedFinancialDocument",
+  "type": "object",
+  "required": [
+    "document_id",
+    "document_type",
+    "header",
+    "vendor",
+    "customer",
+    "line_items",
+    "tax_summary",
+    "totals",
+    "validation",
+    "raw_data"
+  ],
+  "properties": {
+    "document_id": { "type": "string" },
+    "document_type": {
+      "type": "string",
+      "enum": [
+        "invoice",
+        "credit_note",
+        "debit_note",
+        "r4c",
+        "settlement",
+        "purchase_order",
+        "unknown"
+      ]
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 100 },
+    "header": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "invoice_number": { "type": "string" },
+        "invoice_date": { "type": "string" },
+        "document_number": { "type": "string" },
+        "document_date": { "type": "string" },
+        "credit_note_number": { "type": "string" },
+        "debit_note_number": { "type": "string" },
+        "rma_number": { "type": "string" },
+        "return_id": { "type": "string" },
+        "shipment_id": { "type": "string" },
+        "po_number": { "type": "string" },
+        "due_date": { "type": "string" },
+        "payment_terms": { "type": "string" },
+        "currency": { "type": "string" },
+        "irn": { "type": "string" }
+      }
+    },
+    "vendor": { "$ref": "#/$defs/party" },
+    "customer": { "$ref": "#/$defs/party" },
+    "billing_address": { "type": "object", "additionalProperties": true },
+    "shipping_address": { "type": "object", "additionalProperties": true },
+    "receiver_billing_address": { "type": "object", "additionalProperties": true },
+    "receiver_shipping_address": { "type": "object", "additionalProperties": true },
+    "line_items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/lineItem" }
+    },
+    "tax_summary": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "cgst": { "type": "number" },
+        "sgst": { "type": "number" },
+        "igst": { "type": "number" },
+        "cess": { "type": "number" },
+        "tcs": { "type": "number" },
+        "tds": { "type": "number" }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "subtotal": { "type": "number" },
+        "tax_total": { "type": "number" },
+        "grand_total": { "type": "number" }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": ["status", "confidence", "errors", "warnings"],
+      "properties": {
+        "status": { "type": "string", "enum": ["valid", "invalid", "warning"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 100 },
+        "errors": { "type": "array", "items": { "type": "string" } },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "raw_data": {
+      "type": "object",
+      "required": ["pages"],
+      "properties": {
+        "pages": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/rawPage" }
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "party": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "gstin": { "type": "string" },
+        "pan": { "type": "string" },
+        "address": { "type": "string" }
+      }
+    },
+    "lineItem": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "system_ref_no": { "type": "string" },
+        "invoice_date": { "type": "string" },
+        "invoice_no": { "type": "string" },
+        "combo": { "type": "string", "description": "Purchase order number" },
+        "purchase_order_no": { "type": "string" },
+        "vendor_invoice_no": { "type": "string" },
+        "vendor_invoice_date": { "type": "string" },
+        "unit_code": { "type": "string" },
+        "assessable_value": { "type": "number" },
+        "document_date": { "type": "string" },
+        "document_number": { "type": "string" },
+        "asin": { "type": "string" },
+        "sku": { "type": "string" },
+        "ean": { "type": "string" },
+        "hsn": { "type": "string" },
+        "product": { "type": "string" },
+        "tally_name": { "type": "string" },
+        "units": { "type": "string" },
+        "ship_to_state": { "type": "string" },
+        "warehouse": { "type": "string" },
+        "tax_type": { "type": "string" },
+        "tax_rate": { "type": "number" },
+        "quantity": { "type": "number" },
+        "cost_per_unit": { "type": "number" },
+        "total_cost": { "type": "number" },
+        "tax_amount": { "type": "number" },
+        "total_amount": { "type": "number" },
+        "source_ref": { "$ref": "#/$defs/sourceRef" }
+      }
+    },
+    "rawPage": {
+      "type": "object",
+      "required": ["page_number", "raw_text", "ocr_tokens", "tables", "images", "coordinates"],
+      "properties": {
+        "page_number": { "type": "integer", "minimum": 1 },
+        "raw_text": { "type": "string" },
+        "ocr_tokens": { "type": "array", "items": { "type": "object" } },
+        "tables": { "type": "array", "items": { "type": "object" } },
+        "images": { "type": "array", "items": { "type": "object" } },
+        "coordinates": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "sourceRef": {
+      "type": "object",
+      "properties": {
+        "page": { "type": "integer" },
+        "bbox": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}
