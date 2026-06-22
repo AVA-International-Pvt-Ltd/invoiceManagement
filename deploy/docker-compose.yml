@@ -1,0 +1,16 @@
+# Pull-only compose for account team machines (no build, no cloud login).
+# Set IMAGE in .env or pass on the command line.
+
+services:
+  invoice-app:
+    image: ${IMAGE}
+    pull_policy: always
+    container_name: invoice-app
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - invoice-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  invoice-data:

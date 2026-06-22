@@ -43,6 +43,126 @@ uvicorn app.main:app --reload --app-dir backend
 
 Swagger: <http://127.0.0.1:8000/docs>
 
+## Docker (single image)
+
+Build and run the full stack (API + UI) in one container:
+
+```bash
+docker build -t invoice-management:latest .
+docker run --rm -p 8080:8080 -v invoice-data:/app/data invoice-management:latest
+```
+
+Open the app at <http://localhost:8080>. API docs: <http://localhost:8080/api/docs>.
+
+Or use Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+### Share the image
+
+Export for offline use:
+
+```bash
+docker save invoice-management:latest -o invoice-management.tar
+```
+
+On another machine:
+
+```bash
+docker load -i invoice-management.tar
+docker run --rm -p 8080:8080 -v invoice-data:/app/data invoice-management:latest
+```
+
+Uploaded files and extracted JSON are stored in the `invoice-data` volume at `/app/data` inside the container.
+
+## Account team install (Docker pull only)
+
+For people on the account team: **no GCP, no AWS, no source code** — only Docker Desktop and a pull from Docker Hub (or similar).
+
+### What you (maintainer) do once
+
+1. Log in to [Docker Hub](https://hub.docker.com/) (repo: `yashjeetamai/invoice-finintel`).
+
+```bash
+docker login
+```
+
+2. Build and push (replace `1.0.0` with your version tag):
+
+```bash
+docker build -t yashjeetamai/invoice-finintel:1.0.0 .
+docker push yashjeetamai/invoice-finintel:1.0.0
+docker tag yashjeetamai/invoice-finintel:1.0.0 yashjeetamai/invoice-finintel:latest
+docker push yashjeetamai/invoice-finintel:latest
+```
+
+Or from the `deploy` folder on Windows:
+
+```powershell
+.\publish.ps1 -Tag "1.0.0"
+```
+
+3. Tell the team to use: `yashjeetamai/invoice-finintel:latest` (or a specific tag like `1.0.0`).
+
+### What each account team person does
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and start it.
+2. Run **one** of these:
+
+**Windows (PowerShell):**
+
+```powershell
+cd deploy
+.\install.ps1
+```
+
+**Mac / Linux:**
+
+```bash
+cd deploy
+chmod +x install.sh
+./install.sh
+```
+
+**Or manual (any OS):**
+
+```bash
+docker pull yashjeetamai/invoice-finintel:latest
+docker run -d --name invoice-app -p 8080:8080 -v invoice-data:/app/data yashjeetamai/invoice-finintel:latest
+```
+
+3. Open **http://localhost:8080**
+
+### Updates
+
+When you publish a new version:
+
+```bash
+docker build -t yashjeetamai/invoice-finintel:latest .
+docker push yashjeetamai/invoice-finintel:latest
+```
+
+Tell the team to run:
+
+```bash
+docker pull yashjeetamai/invoice-finintel:latest
+docker restart invoice-app
+```
+
+Or re-run `deploy\install.ps1` / `deploy/install.sh`.
+
+### Private image (optional)
+
+If the image is private on Docker Hub, each person runs **once**:
+
+```bash
+docker login
+```
+
+Use a shared **read-only** access token you create in Docker Hub (not your personal password). Still no GCP or cloud console.
+
 ## Repository Structure
 
 ```text

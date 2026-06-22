@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -7,6 +8,7 @@ from uuid import uuid4
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from .duplicates import content_hash, find_prior_upload, scan_duplicates
 from .export import EXPORT_COLUMNS, build_xlsx, flatten_document, flatten_jobs
@@ -23,8 +25,8 @@ from .storage import (
     save_upload,
 )
 
-app = FastAPI(title="Financial Document Intelligence API", version="0.1.0")
-app.add_middleware(
+api = FastAPI(title="Financial Document Intelligence API", version="0.1.0")
+api.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
@@ -59,18 +61,18 @@ def _persist_job(job_id: str, job: JobResult) -> str:
 _hydrate_jobs()
 
 
-@app.get("/health")
+@api.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/v1/quality/summary")
+@api.get("/v1/quality/summary")
 def quality_summary() -> dict[str, Any]:
     """Return verified / review / failed counts for all stored documents."""
     return scan_all_documents(_JOBS)
 
 
-@app.get("/v1/duplicates")
+@api.get("/v1/duplicates")
 def duplicates_summary() -> dict[str, Any]:
     """Return duplicate upload groups (same file content or same file name)."""
     return scan_duplicates(_JOBS)
@@ -151,7 +153,7 @@ def _run_upload_pipeline(
     return job
 
 
-@app.post("/v1/upload", response_model=ProcessResponse)
+@api.post("/v1/upload", response_model=ProcessResponse)
 async def upload_document(file: UploadFile = File(...)) -> ProcessResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="filename is required")
@@ -171,7 +173,7 @@ async def upload_document(file: UploadFile = File(...)) -> ProcessResponse:
     return _build_process_response(job_id, job, prior)
 
 
-@app.post("/v1/process", response_model=ProcessResponse)
+@api.post("/v1/process", response_model=ProcessResponse)
 def process_document(payload: ProcessRequest) -> ProcessResponse:
     job_id = str(uuid4())
     _JOBS[job_id] = JobResult(job_id=job_id, status="processing")
@@ -183,14 +185,14 @@ def process_document(payload: ProcessRequest) -> ProcessResponse:
     return ProcessResponse(job_id=job_id, status="completed")
 
 
-@app.get("/v1/jobs")
+@api.get("/v1/jobs")
 def list_jobs() -> dict[str, Any]:
     jobs = [build_job_summary(job_id, job) for job_id, job in _JOBS.items()]
     jobs.sort(key=lambda item: item["job_id"], reverse=True)
     return {"jobs": jobs, "count": len(jobs)}
 
 
-@app.get("/v1/jobs/{job_id}", response_model=JobResult)
+@api.get("/v1/jobs/{job_id}", response_model=JobResult)
 def get_job(job_id: str) -> JobResult:
     job = _JOBS.get(job_id)
     if not job:
@@ -202,7 +204,7 @@ def get_job(job_id: str) -> JobResult:
     return job
 
 
-@app.get("/v1/jobs/{job_id}/json")
+@api.get("/v1/jobs/{job_id}/json")
 def get_job_json(job_id: str) -> dict[str, Any]:
     payload = load_extraction(job_id)
     if not payload:
@@ -210,7 +212,7 @@ def get_job_json(job_id: str) -> dict[str, Any]:
     return payload
 
 
-@app.get("/v1/jobs/{job_id}/export/flat")
+@api.get("/v1/jobs/{job_id}/export/flat")
 def export_job_flat(job_id: str) -> dict[str, Any]:
     job = _JOBS.get(job_id)
     if not job:
@@ -228,7 +230,7 @@ def export_job_flat(job_id: str) -> dict[str, Any]:
     }
 
 
-@app.get("/v1/jobs/{job_id}/export/xlsx")
+@api.get("/v1/jobs/{job_id}/export/xlsx")
 def export_job_xlsx(job_id: str) -> StreamingResponse:
     job = _JOBS.get(job_id)
     if not job:
@@ -249,7 +251,7 @@ def export_job_xlsx(job_id: str) -> StreamingResponse:
     )
 
 
-@app.get("/v1/export/xlsx")
+@api.get("/v1/export/xlsx")
 def export_all_xlsx() -> StreamingResponse:
     jobs = [(job_id, job) for job_id, job in _JOBS.items() if job.document]
     if not jobs:
@@ -263,7 +265,7 @@ def export_all_xlsx() -> StreamingResponse:
     )
 
 
-@app.post("/v1/export/xlsx/selected")
+@api.post("/v1/export/xlsx/selected")
 def export_selected_xlsx(payload: ExportSelectedRequest) -> StreamingResponse:
     if not payload.job_ids:
         raise HTTPException(status_code=400, detail="job_ids is required")
@@ -291,7 +293,7 @@ def export_selected_xlsx(payload: ExportSelectedRequest) -> StreamingResponse:
     )
 
 
-@app.delete("/v1/jobs/{job_id}")
+@api.delete("/v1/jobs/{job_id}")
 def delete_job(job_id: str) -> dict[str, Any]:
     if job_id not in _JOBS and not load_extraction(job_id):
         raise HTTPException(status_code=404, detail="job not found")
@@ -301,7 +303,7 @@ def delete_job(job_id: str) -> dict[str, Any]:
     return {"job_id": job_id, "status": "deleted"}
 
 
-@app.get("/v1/search")
+@api.get("/v1/search")
 def search_documents(
     invoice_number: str | None = None,
     vendor: str | None = None,
@@ -343,3 +345,12 @@ def search_documents(
         "results": results,
         "count": len(results),
     }
+
+
+STATIC_DIR = os.environ.get("STATIC_DIR")
+if STATIC_DIR and Path(STATIC_DIR).is_dir():
+    app = FastAPI(title="Financial Document Intelligence", version="0.1.0")
+    app.mount("/api", api)
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+else:
+    app = api

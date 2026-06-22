@@ -1,0 +1,12 @@
+services:
+  invoice-app:
+    build: .
+    image: invoice-management:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - invoice-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  invoice-data:
