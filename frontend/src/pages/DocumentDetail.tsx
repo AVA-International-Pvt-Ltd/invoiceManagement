@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { apiFetch } from '../lib/api'
 import { AddressCard } from '../components/AddressCard'
 import { QualityBadge, dataQualityClass } from '../lib/quality'
 
@@ -98,8 +99,8 @@ export function DocumentDetail({ jobId, jobSummary, onClose, onDelete, deleting 
     }
     setLoading(true)
     Promise.all([
-      fetch(`/api/v1/jobs/${jobId}`).then((res) => res.json()),
-      fetch(`/api/v1/jobs/${jobId}/export/flat`).then((res) => res.json()),
+      apiFetch(`/api/v1/jobs/${jobId}`).then((res) => res.json()),
+      apiFetch(`/api/v1/jobs/${jobId}/export/flat`).then((res) => res.json()),
     ])
       .then(([jobData, flatData]) => {
         setDoc(jobData.document ?? null)
@@ -117,7 +118,7 @@ export function DocumentDetail({ jobId, jobSummary, onClose, onDelete, deleting 
     if (!jobId) return
     setExporting(true)
     try {
-      const res = await fetch(`/api/v1/jobs/${jobId}/export/xlsx`)
+      const res = await apiFetch(`/api/v1/jobs/${jobId}/export/xlsx`)
       if (!res.ok) throw new Error('export failed')
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)

@@ -1,3 +1,5 @@
+import { apiFetch } from './api'
+
 const MONTHS: Record<string, number> = {
   jan: 0,
   feb: 1,
@@ -213,7 +215,7 @@ export function matchesFilters(
 }
 
 export async function downloadSelectedXlsx(jobIds: string[]): Promise<void> {
-  const res = await fetch('/api/v1/export/xlsx/selected', {
+  const res = await apiFetch('/api/v1/export/xlsx/selected', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ job_ids: jobIds }),
@@ -230,7 +232,7 @@ export async function downloadSelectedXlsx(jobIds: string[]): Promise<void> {
 }
 
 export async function downloadAllXlsx(): Promise<void> {
-  const res = await fetch('/api/v1/export/xlsx')
+  const res = await apiFetch('/api/v1/export/xlsx')
   if (!res.ok) throw new Error('Export failed')
 
   const blob = await res.blob()

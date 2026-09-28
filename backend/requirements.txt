@@ -6,3 +6,4 @@ pdfplumber
 Pillow
 pytesseract
 openpyxl
+supabase>=2.15.0

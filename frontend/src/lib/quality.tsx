@@ -1,3 +1,5 @@
+import { apiFetch } from './api'
+
 export type ExtractionStatus = 'verified' | 'needs_review' | 'failed'
 
 export type IssueDetail = {
@@ -85,13 +87,13 @@ export function dataQualityClass(value?: string): string {
 }
 
 export async function fetchQualitySummary(): Promise<QualitySummary> {
-  const res = await fetch('/api/v1/quality/summary')
+  const res = await apiFetch('/api/v1/quality/summary')
   if (!res.ok) throw new Error('Failed to load quality summary')
   return res.json()
 }
 
 export async function fetchDuplicatesSummary(): Promise<DuplicatesSummary> {
-  const res = await fetch('/api/v1/duplicates')
+  const res = await apiFetch('/api/v1/duplicates')
   if (!res.ok) throw new Error('Failed to load duplicates')
   return res.json()
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { apiFetch } from '../lib/api'
 import { fetchQualitySummary, type QualitySummary } from '../lib/quality'
 
 type JobSummary = {
@@ -12,14 +13,15 @@ type JobSummary = {
 type Props = {
   refreshKey?: number
   onOpenIssues?: () => void
+  onNavigate?: (page: 'documents' | 'upload' | 'search' | 'issues') => void
 }
 
-export function Dashboard({ refreshKey = 0, onOpenIssues }: Props) {
+export function Dashboard({ refreshKey = 0, onOpenIssues, onNavigate }: Props) {
   const [jobs, setJobs] = useState<JobSummary[]>([])
   const [quality, setQuality] = useState<QualitySummary | null>(null)
 
   useEffect(() => {
-    fetch('/api/v1/jobs')
+    apiFetch('/api/v1/jobs')
       .then((res) => res.json())
       .then((data) => setJobs(data.jobs ?? []))
       .catch(() => setJobs([]))
@@ -85,13 +87,30 @@ export function Dashboard({ refreshKey = 0, onOpenIssues }: Props) {
       )}
 
       <section className="panel">
-        <h2>Getting Started</h2>
-        <p>
-          Upload a PDF invoice on the <strong>Upload</strong> tab, then open <strong>Documents</strong> and click a row to view extracted data.
-        </p>
-        <p className="muted">
-          Each document gets a quality mark: ✓ Verified, ⚠ Review suggested, ✕ Failed. Duplicate uploads are flagged automatically.
-        </p>
+        <h2>How the workspace is used</h2>
+        <p className="muted table-subtitle">Four steps from a PDF to a file the accounts team can export.</p>
+        <div className="workflow">
+          <button type="button" className="workflow-card" onClick={() => onNavigate?.('upload')}>
+            <span className="workflow-step">01</span>
+            <strong>Ingest</strong>
+            <span>Drop invoices, credit notes, and R4C files. Folders are accepted.</span>
+          </button>
+          <button type="button" className="workflow-card" onClick={() => onNavigate?.('documents')}>
+            <span className="workflow-step">02</span>
+            <strong>Review</strong>
+            <span>Open a document, check line items, and confirm totals.</span>
+          </button>
+          <button type="button" className="workflow-card" onClick={() => onOpenIssues?.()}>
+            <span className="workflow-step">03</span>
+            <strong>Resolve</strong>
+            <span>Clear failed extractions and duplicate uploads before close.</span>
+          </button>
+          <button type="button" className="workflow-card" onClick={() => onNavigate?.('search')}>
+            <span className="workflow-step">04</span>
+            <strong>Find</strong>
+            <span>Look up an invoice number, vendor, or GSTIN across the library.</span>
+          </button>
+        </div>
       </section>
     </>
   )

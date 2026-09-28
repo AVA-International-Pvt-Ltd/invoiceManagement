@@ -15,6 +15,7 @@ import {
   matchesFilters,
   sourceLabel,
 } from '../lib/documents'
+import { apiFetch } from '../lib/api'
 import { collectDuplicateJobIds, dataQualityClass, fetchDuplicatesSummary } from '../lib/quality'
 
 type Props = {
@@ -47,7 +48,7 @@ export function Documents({ refreshKey, selectedJobId, onSelectJob, onDocumentDe
 
   const loadJobs = () => {
     setLoading(true)
-    Promise.all([fetch('/api/v1/jobs').then((res) => res.json()), fetchDuplicatesSummary().catch(() => null)])
+    Promise.all([apiFetch('/api/v1/jobs').then((res) => res.json()), fetchDuplicatesSummary().catch(() => null)])
       .then(([jobsData, duplicatesData]) => {
         setJobs(jobsData.jobs ?? [])
         setDuplicateJobIds(collectDuplicateJobIds(duplicatesData))
@@ -163,7 +164,7 @@ export function Documents({ refreshKey, selectedJobId, onSelectJob, onDocumentDe
     const label = fileName || 'this document'
     if (
       !window.confirm(
-        `Delete "${label}" completely?\n\nThis removes the JSON extraction, index entry, and uploaded file.`,
+        `Delete "${label}" completely?\n\nThis removes the uploaded file and its extracted data.`,
       )
     ) {
       return
@@ -171,7 +172,7 @@ export function Documents({ refreshKey, selectedJobId, onSelectJob, onDocumentDe
 
     setDeletingId(jobId)
     try {
-      const res = await fetch(`/api/v1/jobs/${jobId}`, { method: 'DELETE' })
+      const res = await apiFetch(`/api/v1/jobs/${jobId}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Delete failed')
 
       if (activeJobId === jobId) setActiveJobId(null)
@@ -235,7 +236,7 @@ export function Documents({ refreshKey, selectedJobId, onSelectJob, onDocumentDe
     if (
       !window.confirm(
         `Delete ${ids.length} selected document${ids.length === 1 ? '' : 's'} completely?\n\n` +
-          `This removes the JSON extraction, index entry, and uploaded file for each.\n\n` +
+          `This removes the uploaded file and extracted data for each.\n\n` +
           labels.join('\n') +
           more,
       )
@@ -247,7 +248,7 @@ export function Documents({ refreshKey, selectedJobId, onSelectJob, onDocumentDe
     const failed: string[] = []
     try {
       for (const jobId of ids) {
-        const res = await fetch(`/api/v1/jobs/${jobId}`, { method: 'DELETE' })
+        const res = await apiFetch(`/api/v1/jobs/${jobId}`, { method: 'DELETE' })
         if (!res.ok) {
           failed.push(jobId)
           continue

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from .auth import OrgAuthError, verify_org_user
+from .config import INVOICE_BUCKET, supabase_enabled
 from .duplicates import content_hash, find_prior_upload, scan_duplicates
 from .export import EXPORT_COLUMNS, build_xlsx, flatten_document, flatten_jobs
 from .extraction_quality import scan_all_documents
@@ -24,16 +27,31 @@ from .storage import (
     save_extraction,
     save_upload,
 )
+from .supabase_store import (
+    SupabaseStoreError,
+    delete_document_remote,
+    load_all_documents,
+    load_document,
+    upload_original,
+    upsert_document,
+)
 
 api = FastAPI(title="Financial Document Intelligence API", version="0.1.0")
+_cors_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+]
+_cors_origins.extend(
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+)
 api.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ],
+    allow_origins=_cors_origins,
+    allow_origin_regex=r"https://([a-zA-Z0-9-]+\.)?vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,20 +60,79 @@ pipeline = DocumentPipeline()
 _JOBS: dict[str, JobResult] = {}
 
 
+def _load_stored_jobs() -> dict[str, Any]:
+    if supabase_enabled():
+        return load_all_documents()
+    return load_all_extractions()
+
+
+def _load_stored_job(job_id: str) -> dict[str, Any] | None:
+    if supabase_enabled():
+        return load_document(job_id)
+    return load_extraction(job_id)
+
+
 def _hydrate_jobs() -> None:
     global _JOBS
-    stored = load_all_extractions()
+    try:
+        stored = _load_stored_jobs()
+    except SupabaseStoreError as exc:
+        logging.getLogger(__name__).warning("Could not load documents from Supabase: %s", exc)
+        stored = {}
     for job_id, payload in stored.items():
         _JOBS[job_id] = JobResult.model_validate(payload)
 
 
-def _persist_job(job_id: str, job: JobResult) -> str:
+def _persist_job(
+    job_id: str,
+    job: JobResult,
+    *,
+    file_bytes: bytes | None = None,
+    uploaded_by: str | None = None,
+) -> str:
     payload = build_extraction_payload(job_id, job.model_dump(mode="json"))
+    if supabase_enabled():
+        if job.document and file_bytes is not None:
+            file_name = job.document.audit.get("file_name") or "document"
+            storage_path = upload_original(job_id, file_name, file_bytes)
+            job.document.audit["storage_bucket"] = INVOICE_BUCKET
+            job.document.audit["storage_path"] = storage_path
+            payload = build_extraction_payload(job_id, job.model_dump(mode="json"))
+        upsert_document(job_id, payload, uploaded_by=uploaded_by)
     path = save_extraction(job_id, payload)
     if job.document:
         job.document.audit["json_path"] = payload["json_path"]
         job.document.audit["saved_at"] = payload["saved_at"]
     return str(path)
+
+
+_OPEN_PATHS = {"/health", "/openapi.json", "/docs", "/redoc"}
+
+
+@api.middleware("http")
+async def require_org_auth(request: Request, call_next):
+    if request.method == "OPTIONS" or not supabase_enabled():
+        return await call_next(request)
+
+    path = request.url.path.rstrip("/") or "/"
+    if path in _OPEN_PATHS or path.startswith("/docs"):
+        return await call_next(request)
+
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("bearer "):
+        return JSONResponse(
+            {"detail": "Sign in with your @avaipl.com Google account."},
+            status_code=401,
+        )
+
+    try:
+        user = verify_org_user(header.split(" ", 1)[1].strip())
+    except OrgAuthError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=exc.status_code)
+
+    request.state.user_id = user["id"]
+    request.state.email = user["email"]
+    return await call_next(request)
 
 
 _hydrate_jobs()
@@ -120,8 +197,10 @@ def _run_upload_pipeline(
     file_name: str,
     saved_path: Path,
     file_hash: str,
+    file_bytes: bytes,
+    uploaded_by: str | None,
 ) -> JobResult:
-    """Extract and persist one file. Never raises — failed files are saved with an alert."""
+    """Extract and persist one file. Extraction errors are saved with an alert."""
     from .models import DocumentType, ValidationResult
 
     try:
@@ -149,12 +228,16 @@ def _run_upload_pipeline(
         job = JobResult(job_id=job_id, status="completed", document=doc)
 
     _JOBS[job_id] = job
-    _persist_job(job_id, job)
+    try:
+        _persist_job(job_id, job, file_bytes=file_bytes, uploaded_by=uploaded_by)
+    except SupabaseStoreError:
+        _JOBS.pop(job_id, None)
+        raise
     return job
 
 
 @api.post("/v1/upload", response_model=ProcessResponse)
-async def upload_document(file: UploadFile = File(...)) -> ProcessResponse:
+async def upload_document(request: Request, file: UploadFile = File(...)) -> ProcessResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="filename is required")
 
@@ -169,19 +252,42 @@ async def upload_document(file: UploadFile = File(...)) -> ProcessResponse:
     job_id = str(uuid4())
     _JOBS[job_id] = JobResult(job_id=job_id, status="processing")
 
-    job = _run_upload_pipeline(job_id, file.filename, saved_path, file_hash)
+    try:
+        job = _run_upload_pipeline(
+            job_id,
+            file.filename,
+            saved_path,
+            file_hash,
+            content,
+            getattr(request.state, "user_id", None),
+        )
+    except SupabaseStoreError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return _build_process_response(job_id, job, prior)
 
 
 @api.post("/v1/process", response_model=ProcessResponse)
-def process_document(payload: ProcessRequest) -> ProcessResponse:
+def process_document(payload: ProcessRequest, request: Request) -> ProcessResponse:
     job_id = str(uuid4())
     _JOBS[job_id] = JobResult(job_id=job_id, status="processing")
     doc = pipeline.run(source_uri=payload.source_uri, file_name=payload.file_name)
     doc.audit["file_name"] = payload.file_name
     job = JobResult(job_id=job_id, status="completed", document=doc)
     _JOBS[job_id] = job
-    _persist_job(job_id, job)
+    file_bytes = None
+    source = Path(payload.source_uri)
+    if source.is_file():
+        file_bytes = source.read_bytes()
+    try:
+        _persist_job(
+            job_id,
+            job,
+            file_bytes=file_bytes,
+            uploaded_by=getattr(request.state, "user_id", None),
+        )
+    except SupabaseStoreError as exc:
+        _JOBS.pop(job_id, None)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return ProcessResponse(job_id=job_id, status="completed")
 
 
@@ -196,7 +302,7 @@ def list_jobs() -> dict[str, Any]:
 def get_job(job_id: str) -> JobResult:
     job = _JOBS.get(job_id)
     if not job:
-        stored = load_extraction(job_id)
+        stored = _load_stored_job(job_id)
         if not stored:
             raise HTTPException(status_code=404, detail="job not found")
         job = JobResult.model_validate(stored)
@@ -206,7 +312,7 @@ def get_job(job_id: str) -> JobResult:
 
 @api.get("/v1/jobs/{job_id}/json")
 def get_job_json(job_id: str) -> dict[str, Any]:
-    payload = load_extraction(job_id)
+    payload = _load_stored_job(job_id)
     if not payload:
         raise HTTPException(status_code=404, detail="json file not found")
     return payload
@@ -216,7 +322,7 @@ def get_job_json(job_id: str) -> dict[str, Any]:
 def export_job_flat(job_id: str) -> dict[str, Any]:
     job = _JOBS.get(job_id)
     if not job:
-        stored = load_extraction(job_id)
+        stored = _load_stored_job(job_id)
         if not stored:
             raise HTTPException(status_code=404, detail="job not found")
         job = JobResult.model_validate(stored)
@@ -234,7 +340,7 @@ def export_job_flat(job_id: str) -> dict[str, Any]:
 def export_job_xlsx(job_id: str) -> StreamingResponse:
     job = _JOBS.get(job_id)
     if not job:
-        stored = load_extraction(job_id)
+        stored = _load_stored_job(job_id)
         if not stored:
             raise HTTPException(status_code=404, detail="job not found")
         job = JobResult.model_validate(stored)
@@ -274,7 +380,7 @@ def export_selected_xlsx(payload: ExportSelectedRequest) -> StreamingResponse:
     for job_id in payload.job_ids:
         job = _JOBS.get(job_id)
         if not job:
-            stored = load_extraction(job_id)
+            stored = _load_stored_job(job_id)
             if not stored:
                 continue
             job = JobResult.model_validate(stored)
@@ -295,9 +401,14 @@ def export_selected_xlsx(payload: ExportSelectedRequest) -> StreamingResponse:
 
 @api.delete("/v1/jobs/{job_id}")
 def delete_job(job_id: str) -> dict[str, Any]:
-    if job_id not in _JOBS and not load_extraction(job_id):
+    if job_id not in _JOBS and not _load_stored_job(job_id):
         raise HTTPException(status_code=404, detail="job not found")
 
+    if supabase_enabled():
+        try:
+            delete_document_remote(job_id)
+        except SupabaseStoreError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
     delete_document(job_id)
     _JOBS.pop(job_id, None)
     return {"job_id": job_id, "status": "deleted"}

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { apiFetch } from '../lib/api'
 
 type SearchResult = {
   job_id?: string
@@ -21,7 +22,7 @@ export function Search() {
     if (vendor) params.set('vendor', vendor)
     if (gstin) params.set('gstin', gstin)
 
-    const res = await fetch(`/api/v1/search?${params}`)
+    const res = await apiFetch(`/api/v1/search?${params}`)
     const data = await res.json()
     setResults(data.results ?? [])
     setCount(data.count ?? 0)

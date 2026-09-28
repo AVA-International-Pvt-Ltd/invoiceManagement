@@ -6,6 +6,7 @@ import {
   collectInputFiles,
   displayFileName,
 } from '../lib/upload'
+import { apiFetch } from '../lib/api'
 import { QualityBadge, dataQualityClass } from '../lib/quality'
 
 const UPLOAD_CONCURRENCY = 5
@@ -44,7 +45,7 @@ async function uploadOneFile(file: File): Promise<UploadResult> {
   const formData = new FormData()
   formData.append('file', file)
 
-  const res = await fetch('/api/v1/upload', {
+  const res = await apiFetch('/api/v1/upload', {
     method: 'POST',
     body: formData,
   })
